@@ -1,5 +1,6 @@
-import express, { Application, Response } from "express";
+import express, { Application } from "express";
 import { Server as HTTPServer, createServer } from "http";
+import path from "path";
 import { Server as SocketIOServer } from "socket.io";
 
 export class Server {
@@ -7,30 +8,27 @@ export class Server {
   private app: Application;
   private io: SocketIOServer;
 
+  private activeSockets: string[] = [];
+
   private readonly DEFAULT_PORT = 5000;
 
   constructor() {
     this.initialize();
-
-    this.handleRoutes();
-    this.handleSocketConnection();
   }
 
   private initialize(): void {
     this.app = express();
     this.httpServer = createServer(this.app);
     this.io = new SocketIOServer(this.httpServer);
+
+    this.configureApp();
+    this.configureRoutes();
+    this.handleSocketConnection();
   }
 
-  private handleRoutes(): void {
-    this.app.get("/", (_req, res: Response) => {
-      res.send(`<h1>Hello World</h1>`);
-    });
-  }
-
-  private handleSocketConnection(): void {
-    this.io.on("connection", () => {
-      console.log("Socket connected.");
+  private configureRoutes(): void {
+    this.app.get("/", (_req, res) => {
+      res.sendFile("index.html");
     });
   }
 
@@ -38,5 +36,60 @@ export class Server {
     this.httpServer.listen(this.DEFAULT_PORT, () =>
       callback(this.DEFAULT_PORT)
     );
+  }
+
+  private configureApp(): void {
+    this.app.use(express.static(path.join(__dirname, "../public")));
+  }
+
+  private handleSocketConnection(): void {
+    this.io.on("connection", (socket) => {
+      const existingSocket = this.activeSockets.find(
+        (existingSocket) => existingSocket === socket.id
+      );
+
+      if (!existingSocket) {
+        this.activeSockets.push(socket.id);
+
+        socket.emit("update-user-list", {
+          users: this.activeSockets.filter(
+            (existingSocket) => existingSocket !== socket.id
+          ),
+        });
+
+        socket.broadcast.emit("update-user-list", {
+          users: [socket.id],
+        });
+      }
+
+      socket.on("call-user", (data) => {
+        socket.to(data.to).emit("call-made", {
+          offer: data.offer,
+          socket: socket.id,
+        });
+      });
+
+      socket.on("make-answer", (data) => {
+        socket.to(data.to).emit("answer-made", {
+          socket: socket.id,
+          answer: data.answer,
+        });
+      });
+
+      socket.on("reject-call", (data) => {
+        socket.to(data.from).emit("call-rejected", {
+          socket: socket.id,
+        });
+      });
+
+      socket.on("disconnect", () => {
+        this.activeSockets = this.activeSockets.filter(
+          (existingSocket) => existingSocket !== socket.id
+        );
+        socket.broadcast.emit("remove-user", {
+          socketId: socket.id,
+        });
+      });
+    });
   }
 }
