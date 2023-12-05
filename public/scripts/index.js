@@ -62,7 +62,7 @@ function updateUserList(socketIds) {
     }
   });
 }
-const socket = io.connect("https://3f4c-138-185-96-60.ngrok-free.app");
+const socket = io.connect("localhost:5000");
 
 socket.on("update-user-list", ({ users }) => {
   updateUserList(users);
